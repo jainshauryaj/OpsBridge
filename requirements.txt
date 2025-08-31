@@ -1,0 +1,11 @@
+langgraph>=0.2.39
+langchain>=0.2
+langchain-community>=0.2
+langchain-groq>=0.1
+python-dotenv>=1.0
+scikit-learn>=1.4
+psutil>=5.9
+ruff>=0.5
+pydantic>=2
+rich>=13
+mcp>=1.0.0b6

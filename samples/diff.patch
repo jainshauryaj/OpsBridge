@@ -1,0 +1,6 @@
+diff --git a/app/server.py b/app/server.py
+--- a/app/server.py
++++ b/app/server.py
++print('debug mode on')
+-HOST='127.0.0.1'
++HOST='0.0.0.0'

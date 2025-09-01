@@ -1,0 +1,8 @@
+# policies/policy.yaml
+business_hours_block_restart: true
+business_hours_tz: America/New_York
+hours_start: 9
+hours_end: 17
+require_verify_for_cmds: true
+require_rollback_for_restart: true
+max_steps: 10

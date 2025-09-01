@@ -1,0 +1,10 @@
+[
+  {
+    "source": "runbooks/web-502s.md",
+    "text": "id: web-502s\nservice: toy-web\ndiagnostics:\n  - \"curl -s http://localhost:8080/health\"\n  - \"tail -n 100 logs/toy-web.log\"\nfixes:\n  - cmd: \"systemctl restart toy-web\"\n    verify: \"curl -s http://localhost:8080/health\"\n---\n# Web 502s — Runbook\n"
+  },
+  {
+    "source": "docs/style-guide.md",
+    "text": "# Style Guide\n\n- [S1] Use structured errors and 200 OK on health.\n- [S2] No print() in prod and avoid noisy logs.\n- [S3] Avoid binding to 0.0.0.0 in prod.\n"
+  }
+]

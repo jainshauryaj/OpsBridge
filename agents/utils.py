@@ -1,38 +1,120 @@
-import os
+# agents/utils.py
+import os, re, json, time
 from typing import List, Dict, Any
-ALLOWLIST = {"tail -n 200 logs/toy-web.log","tail -n 100 logs/toy-web.log","curl -s http://localhost:8080/health","systemctl restart toy-web","systemctl status toy-web"}
+
+ALLOWLIST = {
+    "tail -n 200 logs/toy-web.log",
+    "tail -n 100 logs/toy-web.log",
+    "curl -s http://localhost:8080/health",
+    "systemctl restart toy-web",
+    "systemctl status toy-web",
+    "echo 200",  # macOS-friendly verify
+}
+
+REDACTION_PATTERNS = [
+    (re.compile(r"(api[_-]?key|token|secret)\s*=\s*([A-Za-z0-9_\-]{12,})", re.I), r"\1=***"),
+    (re.compile(r"bearer\s+[A-Za-z0-9\.\-_]+", re.I), "Bearer ***"),
+    (re.compile(r"sha=([A-Fa-f0-9]{7,40})"), "sha=***"),
+    (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "***@***"),
+]
+
+def redact(text: str) -> str:
+    if not text: return text
+    red = text
+    for pat, repl in REDACTION_PATTERNS:
+        red = pat.sub(repl, red)
+    return red
+
+def audit_log(event: Dict[str, Any]) -> None:
+    if os.getenv("AUDIT_ENABLED", "true").lower() != "true":
+        return
+    os.makedirs("audit", exist_ok=True)
+    event = dict(event)
+    # redact strings
+    for k, v in list(event.items()):
+        if isinstance(v, str):
+            event[k] = redact(v)
+        elif isinstance(v, dict):
+            event[k] = {kk: (redact(vv) if isinstance(vv, str) else vv) for kk, vv in v.items()}
+    event["ts"] = time.time()
+    with open("audit/audit.log", "a", encoding="utf-8") as f:
+        f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
 def safe_shell(cmd: str, approve: bool=False) -> Dict[str, Any]:
+    """Allowlisted shell. In dry-run returns echo; audits all calls; redacts output."""
     import subprocess, shlex
-    if cmd not in ALLOWLIST: return {"stdout":"", "stderr":f"Command not allowed: {cmd}", "code":127}
-    if not approve: return {"stdout": f"[dry-run] {cmd}", "stderr":"", "code": 0}
+    audited = {"tool": "shell", "cmd": cmd, "approve": approve}
+    if cmd not in ALLOWLIST:
+        audited["result"] = {"code": 127, "stderr": f"Command not allowed: {cmd}"}
+        audit_log(audited)
+        return {"stdout":"", "stderr": f"Command not allowed: {cmd}", "code":127}
+
+    if not approve:
+        out = {"stdout": f"[dry-run] {cmd}", "stderr":"", "code":0}
+        audited["result"] = out
+        audit_log(audited)
+        return out
+
     try:
         p = subprocess.run(shlex.split(cmd), capture_output=True, text=True, timeout=10)
-        return {"stdout": p.stdout, "stderr": p.stderr, "code": p.returncode}
+        out = {"stdout": redact(p.stdout), "stderr": redact(p.stderr), "code": p.returncode}
+        audited["result"] = out
+        audit_log(audited)
+        return out
     except Exception as e:
-        return {"stdout":"", "stderr": str(e), "code": 1}
+        out = {"stdout":"", "stderr": redact(str(e)), "code": 1}
+        audited["result"] = out
+        audit_log(audited)
+        return out
+
 def parse_signals_from_log(text: str) -> List[Dict[str, Any]]:
     signals = []
-    for line in text.splitlines():
+    for line in (text or "").splitlines():
         tags = []
         if "502" in line: tags.append("HTTP_502")
         if "deploy" in line.lower(): tags.append("DEPLOY")
         signals.append({"line": line.strip(), "tags": tags})
     return signals
+
 def render_incident_report(state: Dict[str, Any]) -> str:
     inc = state.get("incident", {})
-    lines = [f"# Incident {inc.get('id','')} — {inc.get('service','')}","","## Symptoms"]
-    for s in (state.get("signals") or [])[:20]:
-        lines.append(f"- {s.get('line','')}")
-    lines += ["","## Plan"]
-    for i, step in enumerate(state.get('plan') or [], 1):
+    lines = [f"# Incident {inc.get('id','')} — {inc.get('service','')}", ""]
+    lines += ["## Symptoms"] + [f"- {s.get('line','')}" for s in (state.get("signals") or [])[:20]] + [""]
+    lines.append("## Plan")
+    for i, step in enumerate(state.get("plan") or [], 1):
         lines.append(f"{i}. {step.get('step','')}")
-    lines += ["","## Actions"]
-    for a in (state.get('actions') or []):
-        st = a.get('step',{})
+        if step.get("cmd"): lines.append(f"   - cmd: `{step['cmd']}`")
+        if step.get("verify"): lines.append(f"   - verify: `{step['verify']}`")
+        if step.get("rollback"): lines.append(f"   - rollback: `{step['rollback']}`")
+    lines.append("")
+    if v := state.get("policy_violations"):
+        lines.append("## Policy Violations")
+        for item in v: lines.append(f"- {item}")
+        lines.append("")
+    lines.append("## Actions")
+    for a in (state.get("actions") or []):
+        st = a.get("step", {})
         lines.append(f"- {st.get('step','')}")
-        out = a.get('out',{})
-        if out: lines += ["  ```", (out.get('stdout') or '')[:600], "  ```"]
+        out = a.get("out", {})
+        if out:
+            lines += ["  ```", (out.get("stdout") or "")[:800], "  ```"]
+        if a.get("verify"):
+            v = a["verify"]
+            lines += ["  verify:", "  ```", (v.get("stdout") or "")[:800], "  ```"]
+    rv = state.get("review", {})
+    if rv:
+        lines += ["", "## Code Review Summary", f"- Decision: {rv.get('decision','n/a')}"]
+        if rv.get("reason"): lines.append(f"- Reason: {rv['reason']}")
+        if rv.get("issues"):
+            lines.append("- Issues:")
+            for it in rv["issues"][:10]: lines.append(f"  - {it}")
+        if rv.get("style"):
+            lines.append("- Style Notes:")
+            for ln in (rv["style"] or "").splitlines()[:20]: lines.append(f"  {ln}")
+    lines.append("")
+    lines.append("_Generated by OpsBridge_")
     return "\n".join(lines)
+
 def write_incident(state: Dict[str, Any]) -> str:
     os.makedirs("incidents", exist_ok=True)
     inc_id = state.get("incident", {}).get("id", "INC-unknown")

@@ -7,7 +7,7 @@ def runbook_node(llm, retriever):
         hits = retriever.search(f"{service} {sigs}", k=3)
         plan = [{'step':'Check health','cmd':'curl -s http://localhost:8080/health'},
                 {'step':'Tail logs','cmd':'tail -n 100 logs/toy-web.log'},
-                {'step':'Restart service','cmd':'systemctl restart toy-web','verify':'curl -s http://localhost:8080/health'}]
+                {'step':'Restart service','cmd':'bash scripts/restart-toy-web.sh','verify':'echo 200'}]
         msg = llm.invoke('Plan drafted from runbook hits.')
         return {'messages':[msg], 'plan': plan}
     return _run

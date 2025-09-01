@@ -9,3 +9,7 @@ ruff>=0.5
 pydantic>=2
 rich>=13
 mcp>=1.0.0b6
+fastapi>=0.110
+uvicorn>=0.29
+PyYAML>=6
+python-json-logger>=2

@@ -40,8 +40,8 @@ def should_bridge_to_code(state: IRState) -> bool:
             return True
     return False
 
-def resolved_or_loop(state: IRState):
-    return END if state.get("done") else "triage"
+# def resolved_or_loop(state: IRState):
+#     return END if state.get("done") else "triage"
 
 def main():
     ap = argparse.ArgumentParser()
@@ -72,7 +72,8 @@ def main():
     graph.add_edge("static_analyzer", "style_guide")
     graph.add_edge("style_guide", "negotiator")
     graph.add_edge("negotiator", "commander")
-    graph.add_conditional_edges("commander", resolved_or_loop)
+    # graph.add_conditional_edges("commander", resolved_or_loop)
+    graph.add_edge("commander", END)
 
     app = graph.compile()
 
